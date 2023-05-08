@@ -6,7 +6,7 @@ use reqwest::blocking::{multipart, Client};
 use std::{
     fs,
     io::{self, Write},
-    path::Path,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -79,8 +79,12 @@ impl RobotController {
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |t| t == "java"))
-            .map(|e| e.into_path());
+            .map(|e| e.into_path()).collect();
+        
+        return self.upload_files(local_files);
+    }
 
+    pub fn upload_files(&self, local_files: Vec<PathBuf>) -> Result<()> {
         // Get a listing of remote files, to resolve upload conflicts if a file already exists
         let remote_files = self.get_files()?;
 
