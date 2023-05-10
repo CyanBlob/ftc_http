@@ -2,7 +2,7 @@ use crate::robot::{
     config::AppConfig,
     util::{java_package_to_path, BuildStatus, Files, Result, RobotError},
 };
-use reqwest::blocking::{multipart, Client};
+use reqwest::{multipart, Client};
 use std::{
     fs,
     io::{self, Write},
@@ -20,7 +20,7 @@ pub struct RobotController {
 }
 
 impl RobotController {
-    pub fn new(conf: &mut AppConfig) -> Result<Self> {
+    pub async fn new(conf: &mut AppConfig) -> Result<Self> {
         // Make a HTTP client with a custom connection timeout and cookie support
         let client = Client::builder()
             .connect_timeout(conf.host_timeout)
@@ -31,7 +31,7 @@ impl RobotController {
             let host = Url::parse(&host)?;
             print!("Trying host {}...", host);
             io::stdout().flush()?;
-            match client.get(host.clone()).send() {
+            match client.get(host.clone()).send().await {
                 Ok(resp) if resp.status().is_success() => {
                     println!("online");
                     conf.hosts.swap(0, i);
@@ -51,9 +51,9 @@ impl RobotController {
         Err(RobotError::NotConnected.into())
     }
 
-    pub fn download(&self, dest: &Path) -> Result<()> {
+    pub async fn download(&self, dest: &Path) -> Result<()> {
         // Get a list of the remote files on the device
-        let files = self.get_files()?;
+        let files = self.get_files().await?;
         // Loop over all files with a `.java` extension, downloading them one at a time
         for file in files.iter().filter(|s| s.contains(".java")) {
             let path = dest.join(&file[1..]);
@@ -64,7 +64,7 @@ impl RobotController {
 
             let mut url = self.host.join("/java/file/download")?;
             url.set_query(Some(&["f=/src", file].concat()));
-            let data = self.client.get(url).send()?.text()?;
+            let data = self.client.get(url).send().await?.text().await?;
 
             fs::write(&path, &data)?;
 
@@ -73,37 +73,45 @@ impl RobotController {
         Ok(())
     }
 
-    pub fn upload(&self, src: &Path) -> Result<()> {
+    pub async fn upload(&self, src: &Path) -> Result<()> {
         // Get a listing of all `.java` files in the local target directory
         let local_files = WalkDir::new(src)
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| e.path().extension().map_or(false, |t| t == "java"))
-            .map(|e| e.into_path()).collect();
-        
-        return self.upload_files(local_files);
+            .map(|e| e.into_path())
+            .collect();
+
+        return self.upload_files(local_files).await;
     }
 
-    pub fn upload_files(&self, local_files: Vec<PathBuf>) -> Result<()> {
+    pub async fn upload_files(&self, local_files: Vec<PathBuf>) -> Result<()> {
         // Get a listing of remote files, to resolve upload conflicts if a file already exists
-        let remote_files = self.get_files()?;
+        let remote_files = self.get_files().await?;
 
-        for file in local_files {
-            print!("Pushing {}...", &file.display());
+        for file_path in local_files {
+            print!("Pushing {}...", &file_path.display());
             io::stdout().flush()?;
 
             // Predict the remote path using Java `package` information
-            let java_path = java_package_to_path(&file)?;
+            let java_path = java_package_to_path(&file_path)?;
             // Does the local file already exist on the robot controller?
             if remote_files.contains(&java_path) {
                 // If so, delete it before attempting an upload
-                self.delete(&java_path)?;
+                self.delete(&java_path).await?;
             }
 
             // Finally, upload the local file
             let url = self.host.join("/java/file/upload")?;
-            let form = multipart::Form::new().file("file", file)?;
-            self.client.post(url).multipart(form).send()?;
+
+            let file = fs::read(file_path).unwrap();
+            let file_part = reqwest::multipart::Part::bytes(file)
+                .file_name("file");
+                //.mime_str("image/jpg")
+                //.unwrap();
+
+            let form = multipart::Form::new().part("file", file_part);
+            self.client.post(url).multipart(form).send().await?;
 
             println!("done");
         }
@@ -111,10 +119,10 @@ impl RobotController {
         Ok(())
     }
 
-    pub fn build(&self) -> Result<()> {
+    pub async fn build(&self) -> Result<()> {
         // Start a build on the robot controller
         let url = self.host.join("/java/build/start")?;
-        self.client.get(url).send()?;
+        self.client.get(url).send().await?;
 
         print!("Building...");
         io::stdout().flush()?;
@@ -125,7 +133,7 @@ impl RobotController {
         while build_start.elapsed() < self.build_timeout {
             // Check the build status
             let url = self.host.join("/java/build/status")?;
-            let status: BuildStatus = self.client.get(url).send()?.json()?;
+            let status: BuildStatus = self.client.get(url).send().await?.json().await?;
 
             // If the build has completed
             if status.completed {
@@ -139,7 +147,7 @@ impl RobotController {
 
                     // And print the encountered build errors
                     let url = self.host.join("/java/build/wait")?;
-                    println!("{}", self.client.get(url).send()?.text()?);
+                    println!("{}", self.client.get(url).send().await?.text().await?);
                 }
                 // Return from the function since the build is complete
                 return Ok(());
@@ -157,30 +165,30 @@ impl RobotController {
         Err(RobotError::BuildTimeout(self.build_timeout).into())
     }
 
-    pub fn wipe(&self) -> Result<()> {
+    pub async fn wipe(&self) -> Result<()> {
         print!("Wiping all remote files...");
         io::stdout().flush()?;
 
         // Recursively delete all files on the robot controller
-        self.delete("/")?;
+        self.delete("/").await?;
 
         println!("done");
         Ok(())
     }
 
-    fn delete(&self, file: &str) -> Result<()> {
+    async fn delete(&self, file: &str) -> Result<()> {
         let url = self.host.join("/java/file/delete")?;
         // Build the form params to be POSTed to delete the file
         let params = [("delete", format!(r#"["src/{}"]"#, &file[1..]))];
-        self.client.post(url).form(&params).send()?;
+        self.client.post(url).form(&params).send().await?;
 
         Ok(())
     }
 
-    fn get_files(&self) -> Result<Vec<String>> {
+    async fn get_files(&self) -> Result<Vec<String>> {
         // Read the remote file-tree into a vector of paths
         let url = self.host.join("/java/file/tree")?;
-        let tree: Files = self.client.get(url).send()?.json()?;
+        let tree: Files = self.client.get(url).send().await?.json().await?;
         Ok(tree.src)
     }
 }

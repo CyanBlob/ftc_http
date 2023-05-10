@@ -83,7 +83,7 @@ pub struct Ftc {
     pub restore_defaults: bool,
 }
 
-pub fn run(opt: Ftc) {
+pub async fn run(opt: Ftc) {
     if opt.restore_defaults {
         catch!(
             confy::store("ftc_http", AppConfig::default()),
@@ -112,8 +112,9 @@ pub fn run(opt: Ftc) {
         if let Some(s) = opt.build_timeout_sec {
             conf.build_timeout = Duration::from_secs(s);
         }
+        
         let r = catch!(
-            RobotController::new(&mut conf),
+            RobotController::new(&mut conf).await,
             3,
             "Failed to establish a connection with the robot controller. \n\n{e}"
         );
@@ -124,28 +125,28 @@ pub fn run(opt: Ftc) {
         );
         if opt.download {
             catch!(
-                r.download(dirs.next().unwrap()),
+                r.download(dirs.next().unwrap()).await,
                 4,
                 "Failed to download source files from the robot controller. \n\n{e}"
             );
         }
         if opt.wipe {
             catch!(
-                r.wipe(),
+                r.wipe().await,
                 5,
                 "Failed to wipe source files from the robot controller. \n\n{e}"
             );
         }
         if opt.upload {
             catch!(
-                r.upload(dirs.next().unwrap()),
+                r.upload(dirs.next().unwrap()).await,
                 6,
                 "Failed to upload source files to the robot controller. \n\n{e}"
             );
         }
         if opt.build {
             catch!(
-                r.build(),
+                r.build().await,
                 7,
                 "Failed to build the source file on the robot controller. \n\n{e}"
             );
