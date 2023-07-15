@@ -90,7 +90,7 @@ impl RobotController {
         let remote_files = self.get_files().await?;
 
         for file_path in local_files {
-            print!("Pushing {}...", &file_path.display());
+            println!("Pushing {}...", &file_path.display());
             io::stdout().flush()?;
 
             // Predict the remote path using Java `package` information
@@ -105,15 +105,17 @@ impl RobotController {
             let url = self.host.join("/java/file/upload")?;
 
             let file = fs::read(file_path).unwrap();
+            
             let file_part = reqwest::multipart::Part::bytes(file)
-                .file_name("file");
-                //.mime_str("image/jpg")
-                //.unwrap();
+                .file_name("EasyFTC_teleop.java")
+                .mime_str("text/plain")
+                .unwrap();
 
             let form = multipart::Form::new().part("file", file_part);
+
             self.client.post(url).multipart(form).send().await?;
 
-            println!("done");
+            println!("Done");
         }
 
         Ok(())
