@@ -107,7 +107,7 @@ impl RobotController {
             let file = fs::read(file_path).unwrap();
             
             let file_part = reqwest::multipart::Part::bytes(file)
-                .file_name("EasyFTC_teleop.java")
+                .file_name("FTCreate_teleop.java")
                 .mime_str("text/plain")
                 .unwrap();
 
