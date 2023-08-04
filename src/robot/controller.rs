@@ -73,7 +73,7 @@ impl RobotController {
         Ok(())
     }
 
-    pub async fn upload(&self, src: &Path) -> Result<()> {
+    pub async fn upload(&self, src: &Path, file_name: &str) -> Result<()> {
         // Get a listing of all `.java` files in the local target directory
         let local_files = WalkDir::new(src)
             .into_iter()
@@ -82,10 +82,10 @@ impl RobotController {
             .map(|e| e.into_path())
             .collect();
 
-        return self.upload_files(local_files).await;
+        return self.upload_files(local_files, file_name).await;
     }
 
-    pub async fn upload_files(&self, local_files: Vec<PathBuf>) -> Result<()> {
+    pub async fn upload_files(&self, local_files: Vec<PathBuf>, file_name: &str) -> Result<()> {
         // Get a listing of remote files, to resolve upload conflicts if a file already exists
         let remote_files = self.get_files().await?;
 
@@ -107,7 +107,7 @@ impl RobotController {
             let file = fs::read(file_path).unwrap();
             
             let file_part = reqwest::multipart::Part::bytes(file)
-                .file_name("FTCreate_teleop.java")
+                .file_name(file_name.to_owned())
                 .mime_str("text/plain")
                 .unwrap();
 

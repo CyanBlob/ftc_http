@@ -139,7 +139,7 @@ pub async fn run(opt: Ftc) {
         }
         if opt.upload {
             catch!(
-                r.upload(dirs.next().unwrap()).await,
+                r.upload(dirs.next().unwrap(), "tmp.java").await,
                 6,
                 "Failed to upload source files to the robot controller. \n\n{e}"
             );
